@@ -377,20 +377,25 @@ def extract_mayor_from_previous(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def merge_with_previous(prev_detalle: pd.DataFrame, nuevo_detalle: pd.DataFrame) -> pd.DataFrame:
-    """Une resultado previo con nuevo resultado, eliminando duplicados."""
+    """Une resultado previo con nuevo resultado, eliminando duplicados y sin arrastrar 'Solo en Mayor' del previo."""
     # Remover duplicados en cada DataFrame por separado
     if prev_detalle.columns.duplicated().any():
         prev_detalle = prev_detalle.loc[:, ~prev_detalle.columns.duplicated()].copy()
     if nuevo_detalle.columns.duplicated().any():
         nuevo_detalle = nuevo_detalle.loc[:, ~nuevo_detalle.columns.duplicated()].copy()
-    
+
+    # No arrastrar filas "Solo en Mayor" del resultado previo
+    # (el nuevo_detalle ya trae el nuevo estado de esas filas)
+    if "estado" in prev_detalle.columns:
+        prev_detalle = prev_detalle[prev_detalle["estado"] != "Solo en Mayor"].copy()
+
     # Unir columnas
     cols = list(set(prev_detalle.columns) | set(nuevo_detalle.columns))
     prev_al = prev_detalle.reindex(columns=cols)
     nuevo_al = nuevo_detalle.reindex(columns=cols)
     combinado = pd.concat([prev_al, nuevo_al], ignore_index=True)
     combinado = combinado.drop_duplicates()
-    
+
     # Normalizar fechas para Arrow/Streamlit
     combinado = _coerce_datetime64(combinado)
     return combinado
