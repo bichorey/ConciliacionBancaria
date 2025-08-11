@@ -1,0 +1,12 @@
+pycache/
+.streamlit/
+.env
+*.pyc
+.DS_Store
+venv/
+.venv/
+.idea/
+.vscode/
+*.xlsx
+!Conciliacion_Bancaria.xlsx
+!Conciliacion_Bancaria (2).xlsx
