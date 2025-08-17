@@ -1,12 +1,27 @@
-pycache/
-.streamlit/
-.env
-*.pyc
-.DS_Store
-venv/
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+
+# Directorios de entorno virtual
 .venv/
-.idea/
-.vscode/
+venv/
+env/
+
+# --- Archivos temporales ---
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Resultados de pruebas o datos ---
 *.xlsx
-!Conciliacion_Bancaria.xlsx
-!Conciliacion_Bancaria (2).xlsx
+*.xls
+*.csv
+*.parquet
+
+# --- Streamlit ---
+.streamlit/

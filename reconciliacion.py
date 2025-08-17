@@ -88,11 +88,15 @@ def conciliacion_mvp(
     tolerancia_dias: int,
     max_items_grupo: int,
     direccion: str = "MAYOR→BANCO",
+    tolerancia_valor: float = 0.0,
 ):
     """
     Conciliación bancaria con estrategia MVP:
-    1. One-to-one exacto con tolerancia de fechas
+    1. One-to-one exacto con tolerancia de fechas y valores
     2. Many-to-one (agrupación) si max_items_grupo > 1
+    
+    Args:
+        tolerancia_valor: Diferencia máxima permitida entre importes (default: 0.0)
     """
     mayor = _normalizar_mayor(df_mayor_in)
     banco = _normalizar_banco(df_banco_in)
@@ -108,32 +112,63 @@ def conciliacion_mvp(
     usados_banco: set[int] = set()
     matches: list[dict] = []
 
-    # --- One-to-one exacto con tolerancia de fechas ---
-    mayor_map: dict[tuple[float, int], list[tuple[int, datetime]]] = {}
-    for rid, r in mayor_idx.iterrows():
-        key = (r["Importe_norm"], r["signo"])
-        mayor_map.setdefault(key, []).append((rid, r["Fecha_norm"]))
-
+    # --- One-to-one con tolerancia de fechas y valores ---
+    # Ahora no podemos usar un mapa directo por importe exacto
+    # Tenemos que buscar para cada banco todos los mayores compatibles
+    
     for bid, b in banco_idx.iterrows():
         if bid in usados_banco:
             continue
-        key = (b["Importe_norm"], b["signo"])
-        cand = mayor_map.get(key, [])
-        if not cand:
-            continue
-        cand_validos = [
-            (rid, f)
-            for (rid, f) in cand
-            if rid not in usados_mayor and _diferencia_dias(f, b["Fecha_norm"]) <= tolerancia_dias
+            
+        # Buscar candidatos del Mayor con mismo signo y dentro de tolerancia de valor
+        candidatos_mayor = mayor_idx[
+            (mayor_idx["signo"] == b["signo"]) & 
+            (~mayor_idx.index.isin(usados_mayor)) &
+            (abs(mayor_idx["Importe_norm"] - b["Importe_norm"]) <= tolerancia_valor)
         ]
-        if not cand_validos:
+        
+        if candidatos_mayor.empty:
             continue
-        cand_validos.sort(key=lambda x: (_diferencia_dias(x[1], b["Fecha_norm"]), x[1]))
-        rid_sel, f_sel = cand_validos[0]
+            
+        # Filtrar por tolerancia de días
+        cand_validos = candidatos_mayor[
+            _diferencia_dias_series(candidatos_mayor["Fecha_norm"], b["Fecha_norm"]) <= tolerancia_dias
+        ]
+        
+        if cand_validos.empty:
+            continue
+            
+        # Ordenar por: diferencia de días, diferencia de importe, fecha más antigua
+        cand_validos = cand_validos.assign(
+            diff_days=cand_validos["Fecha_norm"].apply(lambda d: _diferencia_dias(d, b["Fecha_norm"])),
+            diff_importe=abs(cand_validos["Importe_norm"] - b["Importe_norm"])
+        )
+        cand_validos = cand_validos.sort_values(
+            by=["diff_days", "diff_importe", "Fecha_norm"], 
+            ascending=[True, True, True]
+        )
+        
+        # Seleccionar el mejor candidato
+        rid_sel = cand_validos.index[0]
+        r_sel = cand_validos.iloc[0]
+        
         usados_mayor.add(rid_sel)
         usados_banco.add(bid)
-        diff_days = _diferencia_dias(f_sel, b["Fecha_norm"])
-        estado = "Conciliado exacto" if diff_days == 0 else "Conciliado por tolerancia"
+        
+        diff_days = int(r_sel["diff_days"])
+        diff_importe = float(r_sel["diff_importe"])
+        
+        # Determinar estado según las diferencias
+        if diff_days == 0 and diff_importe == 0:
+            estado = "Conciliado exacto"
+        elif diff_importe == 0 and diff_days > 0:
+            estado = "Conciliado por tolerancia de fecha"
+        elif diff_importe > 0 and diff_importe <= tolerancia_valor:
+            estado = "Conciliado por tolerancia de valor"
+        else:
+            # Este caso no debería ocurrir por el filtro previo
+            estado = "Conciliado por tolerancia"
+            
         matches.append({
             "row_id_mayor": rid_sel,
             "row_id_banco": bid,
@@ -188,7 +223,9 @@ def conciliacion_mvp(
 
                 if len(indices) > max_items_grupo:
                     return
-                if abs(curr_sum - objetivo) < 1e-9 and len(indices) >= 1:
+                    
+                # Cambio clave: usar tolerancia_valor en vez de 1e-9
+                if abs(curr_sum - objetivo) <= tolerancia_valor and len(indices) >= 1:
                     max_diff = max(diffs[i] for i in indices) if indices else 0
                     cand_tuple = (tuple(indices), max_diff, len(indices))
                     if mejor_sol is None:
@@ -200,9 +237,11 @@ def conciliacion_mvp(
                         if (cand_tuple[1], cand_tuple[2], new_oldest) < (curr_best[1], curr_best[2], curr_oldest):
                             mejor_sol = cand_tuple
                     return
-                if sign_key >= 0 and curr_sum > objetivo + 1e-9:
+                    
+                # Podas optimizadas considerando tolerancia_valor
+                if sign_key >= 0 and curr_sum > objetivo + tolerancia_valor:
                     return
-                if sign_key < 0 and curr_sum < objetivo - 1e-9:
+                if sign_key < 0 and curr_sum < objetivo - tolerancia_valor:
                     return
 
                 for i in range(start, len(rids)):
